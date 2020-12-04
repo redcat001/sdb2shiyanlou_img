@@ -1,0 +1,67 @@
+FROM ubuntu:16.04
+
+LABEL Description="This image is used to start SequoiaDB"
+LABEL Vendor="SequoiaDB Ltd."
+LABEL Version="5.01"
+LABEL Maintainer="contact@sequoiadb.com"
+
+ARG workdir=/home/shiyanlou
+
+WORKDIR $workdir
+    
+COPY sources.list ./
+RUN mv sources.list /etc/apt/
+ 
+
+
+RUN apt-get -y update \
+    && apt-get -y install sudo \
+    && apt-get -y install vim \
+    && apt-get -y install net-tools 
+
+# add CHINA
+RUN apt-get -y install language-pack-zh-hans
+RUN apt-get install -y tzdata
+RUN cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && echo 'Asia/Shanghai' >/etc/timezone
+ENV LANG="zh_CN.UTF-8"
+RUN echo "export LC_ALL=zh_CN.UTF-8"  >>  /etc/profile &&  echo "export LC_ALL=zh_CN.UTF-8" >>/root/.bashrc
+RUN localedef -c -f UTF-8 -i zh_CN zh_CN.utf8
+
+# add shiyanlou user 
+RUN useradd shiyanlou \
+    && echo 'shiyanlou:shiyanlou' |chpasswd \
+    && usermod -s /bin/bash shiyanlou
+
+
+
+RUN echo 'shiyanlou  ALL=(ALL:ALL) NOPASSWD:ALL'>> /etc/sudoers
+
+COPY sequoiadb-5.0.1-enterprise-linux_x86_64.tar.gz  ./
+
+RUN tar -zxvf ./sequoiadb-5.0.1-enterprise-linux_x86_64.tar.gz ;rm ./sequoiadb-5.0.1-enterprise-linux_x86_64.tar.gz
+
+
+RUN echo '' >> ./sequoiadb-5.0.1/setup.sh
+RUN echo "sed -i 's/service, dbPath ) ;/service, dbPath , {logfilesz:64,logfilenum:5,transactionon:true} ) ;/g'  /opt/sequoiadb/tools/deploy/quickDeploy.js" >> ./sequoiadb-5.0.1/setup.sh
+RUN echo "sed -i 's/ dbPath, configure ) ;/ dbPath, {logfilesz:64,logfilenum:5,transactionon:true} ) ;/g'  /opt/sequoiadb/tools/deploy/quickDeploy.js" >> ./sequoiadb-5.0.1/setup.sh
+
+RUN tar -czvf ./sequoiadb-5.0.1-enterprise-linux_x86_64.tar.gz ./sequoiadb-5.0.1; rm -rf ./sequoiadb-5.0.1
+
+
+RUN chown -R shiyanlou:shiyanlou /home/shiyanlou
+
+RUN apt-get -y update \
+    && apt-get -y install openssh-server \
+    && apt-get -y install expect \
+    && apt-get -y install openjdk-8-jdk \
+    && apt-get -y install fuse \
+    && apt-get -y install curl \
+    && apt-get -y install lsof
+
+# no passwd ssh login
+RUN mkdir -p /var/run/sshd \
+    && sed -ri 's/^PermitRootLogin\s+.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
+    && sed -ri 's/UsePAM yes/#UsePAM yes/g' /etc/ssh/sshd_config
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd","-D"]

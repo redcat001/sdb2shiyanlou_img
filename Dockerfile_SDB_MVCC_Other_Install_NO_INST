@@ -1,0 +1,127 @@
+FROM ubuntu:16.04
+
+LABEL Description="This image is used to start SequoiaDB"
+LABEL Vendor="SequoiaDB Ltd."
+LABEL Version="5.01"
+LABEL Maintainer="contact@sequoiadb.com"
+
+ARG workdir=/home/shiyanlou
+
+
+#USER root
+
+WORKDIR $workdir
+
+    
+ADD sources.list ./
+RUN mv sources.list /etc/apt/
+
+
+RUN apt-get -y update \
+    && apt-get -y install sudo \
+    && apt-get -y install net-tools 
+
+# add CHINA
+RUN apt-get -y install language-pack-zh-hans
+RUN apt-get install -y tzdata
+RUN cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && echo 'Asia/Shanghai' >/etc/timezone
+ENV LANG="zh_CN.UTF-8"
+RUN echo "export LC_ALL=zh_CN.UTF-8"  >>  /etc/profile &&  echo "export LC_ALL=zh_CN.UTF-8" >>/root/.bashrc
+RUN localedef -c -f UTF-8 -i zh_CN zh_CN.utf8
+
+# add shiyanlou user 
+RUN useradd shiyanlou \
+    && echo 'shiyanlou:shiyanlou' |chpasswd \
+    && usermod -s /bin/bash shiyanlou
+
+RUN cat /etc/hosts
+
+
+ADD sequoiadb-5.0.1-enterprise-linux_x86_64.tar.gz ./
+
+RUN chmod +x $workdir/sequoiadb-5.0.1/sequoiadb-5.0.1-linux_x86_64-enterprise-installer.run
+#sdb
+RUN $workdir/sequoiadb-5.0.1/sequoiadb-5.0.1-linux_x86_64-enterprise-installer.run  --installer-language zh_CN --prefix /opt/sequoiadb  --username sdbadmin --groupname  sdbadmin_group --userpasswd sdbadmin --unattendedmodeui none  --SMS false --processAutoStart false --port 11790 --mode  unattended \
+; exit 0
+
+#mysql
+RUN chmod +x  $workdir/sequoiadb-5.0.1/sequoiasql-mysql-5.0.1-linux_x86_64-enterprise-installer.run
+RUN $workdir/sequoiadb-5.0.1/sequoiasql-mysql-5.0.1-linux_x86_64-enterprise-installer.run  --mode  unattended --installer-language zh_CN --prefix  /opt/sequoiasql/mysql  --user sdbadmin --group sdbadmin_group --passwd sdbadmin
+
+COPY mysql.sql /
+
+RUN echo 'export TERMINFO=/lib/terminfo/' >> /home/sdbadmin/.bashrc
+
+
+#pg
+USER root
+RUN chmod +x $workdir/sequoiadb-5.0.1/sequoiasql-postgresql-5.0.1-x86_64-enterprise-installer.run
+RUN $workdir/sequoiadb-5.0.1/sequoiasql-postgresql-5.0.1-x86_64-enterprise-installer.run --mode  unattended --installer-language zh_CN --prefix  /opt/sequoiasql/postgresql  --user sdbadmin --group sdbadmin_group --passwd sdbadmin 
+
+COPY postgresql.sql /
+
+RUN echo 'export TERMINFO=/lib/terminfo/' >> /home/sdbadmin/.bashrc
+
+
+
+#fuse --filesys
+
+
+RUN rm -rf sequoiadb-5.0.1*
+RUN mkdir /home/sdbadmin/soft
+COPY mysql-jdbc.jar  /home/sdbadmin/soft
+COPY spark-2.4.7-bin-hadoop2.7.tgz /home/sdbadmin/soft
+RUN chown -R sdbadmin:sdbadmin_group /home/sdbadmin
+RUN chown -R shiyanlou:shiyanlou /home/shiyanlou 
+
+
+RUN apt-get -y update \
+    && apt-get -y install openssh-server \
+    && apt-get -y install expect \
+    && apt-get -y install openjdk-8-jdk \
+    && apt-get -y install fuse \
+    && apt-get -y install curl \
+    && apt-get -y install lsof
+
+
+
+
+RUN apt-get -y install  vim \
+    && apt-get -y install  python2.7 \
+    && apt-get -y install  cron \
+    && ln -s /usr/bin/python2.7  /usr/bin/python
+COPY gosu /usr/local/bin/
+RUN set -ex; \
+	rm -rf /var/lib/apt/lists/*; \
+	chmod +x /usr/local/bin/gosu; 
+
+
+# no passwd ssh login
+RUN mkdir -p  /var/run/sshd \
+    && sed -ri 's/^PermitRootLogin\s+.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
+    && sed -ri 's/UsePAM yes/#UsePAM yes/g' /etc/ssh/sshd_config
+
+
+RUN echo 'shiyanlou    ALL=(ALL:ALL) NOPASSWD:ALL'>> /etc/sudoers
+RUN echo 'sdbadmin    ALL=(ALL:ALL) NOPASSWD:ALL'>> /etc/sudoers
+
+EXPOSE 22
+
+ADD entrypoint_sdb_other_install_no_instmvcc.sh /
+ADD create1copymvcc.js   /
+ADD createdate1mvcc.js   /
+ADD createdate2mvcc.js   /
+ADD createdate3mvcc.js   /
+ADD rmtmpcoord.js   /
+COPY samples.tar /opt/sequoiadb/samples.tar
+COPY SsqlDisseminateDDL.tar /home/sdbadmin
+RUN chown sdbadmin:sdbadmin_group /opt/sequoiadb/samples.tar
+
+RUN chown sdbadmin:sdbadmin_group /opt
+
+RUN chown sdbadmin:sdbadmin_group /home/sdbadmin/SsqlDisseminateDDL.tar
+
+ADD ssh.sh   /
+RUN chmod +x  /ssh.sh
+RUN chmod 755 /entrypoint_sdb_other_install_no_instmvcc.sh
+ENTRYPOINT ["/entrypoint_sdb_other_install_no_instmvcc.sh"]
